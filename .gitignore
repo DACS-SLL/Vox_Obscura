@@ -25,6 +25,7 @@ sysinfo.txt
 *.sln
 *.user
 *.userprefs
+
 *.sln.*
 *.vcxproj*
 *.pidb
