@@ -51,4 +51,11 @@ public class PlayerInteraction : MonoBehaviour
             currentInteractable.Interact();
         }
     }
+
+    public void HidePrompt()
+    {
+        promptText.enabled = false;
+        if (interactIconRoot != null) interactIconRoot.SetActive(false);
+    }
+
 }

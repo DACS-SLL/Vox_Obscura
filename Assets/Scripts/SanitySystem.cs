@@ -1,10 +1,25 @@
 using TMPro;
 using UnityEngine;
-using PostPP = UnityEngine.Rendering.PostProcessing;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+using PostPP = UnityEngine.Rendering.PostProcessing;
 
 public class SanitySystem : MonoBehaviour
 {
+    public LightDetector lightDetector;
+    public static SanitySystem Instance;
+    public GameObject gameOverScreen;
+
+    [Header("Sanidad según oscuridad")]
+    public float sanityDrainInDark = 5f;
+    public float sanityDrainInDim = 1f;
+    public float lightThresholdDim = 0.4f;
+    public float lightThresholdDark = 0.15f;
+
+    [Header("Recuperación de Sanidad")]
+    public float sanityRegenRate = 2f;
+    public float lightThresholdRegen = 0.2f;
+
     [Header("Valores")]
     public float maxSanity = 100f;
     public float currentSanity;
@@ -12,7 +27,7 @@ public class SanitySystem : MonoBehaviour
     [Header("UI")]
     public Image sanityMask;
     public TextMeshProUGUI sanityText;
-    public Image pulsePanel; // Panel rojo para pulso cardíaco
+    public Image pulsePanel;
 
     [Header("AudioSources Ambientales")]
     public AudioSource ambienteNormal;
@@ -33,13 +48,17 @@ public class SanitySystem : MonoBehaviour
     private PostPP.DepthOfField dof;
 
     [Header("Configuración visual")]
-    public float pulseIntensity = 0.2f; // intensidad del pulso cardíaco
+    public float pulseIntensity = 0.2f;
 
     private AudioSource currentAmbient;
 
-    // Flags para reproducir clips puntuales una sola vez
     private bool golpeMetalPlayed = false;
     private bool sonidosTerrorPlayed = false;
+
+    private void Awake()
+    {
+        Instance = this;
+    }
 
     void Start()
     {
@@ -47,7 +66,6 @@ public class SanitySystem : MonoBehaviour
         UpdateUI();
         PlayAmbient(ambienteNormal);
 
-        // Obtener referencias a los efectos
         postProcessVolume.profile.TryGetSettings(out chromAber);
         postProcessVolume.profile.TryGetSettings(out lensDist);
         postProcessVolume.profile.TryGetSettings(out vignette);
@@ -56,10 +74,24 @@ public class SanitySystem : MonoBehaviour
 
     void Update()
     {
-        // --- PRUEBA: disminuir sanidad con espacio ---
-        if (Input.GetKeyDown(KeyCode.Space))
+        // Si ya está muerto, no sigue bajando ni subiendo
+        if (currentSanity <= 0)
+            return;
+
+        float luz = lightDetector.lightLevel;
+
+        if (luz < lightThresholdDark)
         {
-            ReduceSanity(5f);
+            ReduceSanity(sanityDrainInDark * Time.deltaTime);
+        }
+        else if (luz < lightThresholdDim)
+        {
+            ReduceSanity(sanityDrainInDim * Time.deltaTime);
+        }
+        else if (luz >= lightThresholdRegen)
+        {
+            currentSanity += sanityRegenRate * Time.deltaTime;
+            currentSanity = Mathf.Clamp(currentSanity, 0, maxSanity);
         }
 
         UpdateUI();
@@ -69,33 +101,44 @@ public class SanitySystem : MonoBehaviour
     {
         currentSanity -= amount;
         currentSanity = Mathf.Clamp(currentSanity, 0, maxSanity);
+
+        if (currentSanity <= 0)
+        {
+            TriggerGameOver();
+        }
+    }
+
+    private void TriggerGameOver()
+    {
+        Debug.Log("GAME OVER: Sanidad llegó a 0");
+
+        Time.timeScale = 0f;
+        Cursor.lockState = CursorLockMode.None;
+        Cursor.visible = true;
+
+        if (gameOverScreen != null)
+            gameOverScreen.SetActive(true);
     }
 
     void UpdateUI()
     {
         float fill = currentSanity / maxSanity;
 
-        // HUD
         sanityMask.fillAmount = fill;
         sanityText.text = $"Sanidad {Mathf.RoundToInt(fill * 100)}%";
         sanityMask.color = GetSanityColor(fill);
         sanityText.color = GetSanityColor(fill);
 
-        // Pulso cardíaco
         HandlePulse(fill);
-
-        // Audio según rango
         HandleAudio(fill);
-
-        // PostProcessing
         HandlePostProcessing(fill);
     }
 
     Color GetSanityColor(float fill)
     {
         if (fill > 0.75f) return Color.green;
-        if (fill > 0.45f) return new Color(1f, 0.85f, 0f); // amarillo
-        if (fill > 0.20f) return new Color(1f, 0.5f, 0f);  // naranja
+        if (fill > 0.45f) return new Color(1f, 0.85f, 0f);
+        if (fill > 0.20f) return new Color(1f, 0.5f, 0f);
         return Color.red;
     }
 
@@ -113,14 +156,13 @@ public class SanitySystem : MonoBehaviour
         AudioSource nextAmbient = ambienteNormal;
 
         if (fill > 0.45f) nextAmbient = ambienteNormal;
-        else if (fill <= 0.45f && fill > 0.25f) nextAmbient = murmullosLeves;
+        else if (fill > 0.45f && fill > 0.25f) nextAmbient = murmullosLeves;
         else if (fill <= 0.25f && fill > 0.15f) nextAmbient = murmullosFuertes;
         else nextAmbient = soloMurmullos;
 
         if (nextAmbient != currentAmbient)
             PlayAmbient(nextAmbient);
 
-        // Clips puntuales
         if (!golpeMetalPlayed && fill <= 0.25f && fill > 0.15f)
         {
             PlayClipOnce(golpeMetal);
@@ -154,5 +196,15 @@ public class SanitySystem : MonoBehaviour
         if (lensDist != null) lensDist.intensity.value = Mathf.Lerp(0f, -30f, 1 - fill);
         if (vignette != null) vignette.intensity.value = Mathf.Lerp(0.2f, 0.6f, 1 - fill);
         if (dof != null) dof.aperture.value = Mathf.Lerp(5f, 2f, 1 - fill);
+    }
+
+    public void RestartGame()
+    {
+        Time.timeScale = 1f; // reanudar juego
+        Cursor.lockState = CursorLockMode.Locked;
+        Cursor.visible = false;
+
+        Scene currentScene = SceneManager.GetActiveScene();
+        SceneManager.LoadScene(currentScene.name);
     }
 }
